@@ -167,7 +167,13 @@ func (ctrl *RQController) Execute() bool {
 func (ctrl *RQController) execute(key string) (error, enqueueState) {
 	arqNS, arqName, err := cache.SplitMetaNamespaceKey(key)
 	namespace, err := ctrl.namespaceLister.Get(arqNS)
-	if kapierrors.IsNotFound(err) || namespace.Status.Phase == v1.NamespaceTerminating {
+	if kapierrors.IsNotFound(err) {
+		return nil, Forget
+	}
+	if err != nil {
+		return err, Immediate
+	}
+	if namespace.Status.Phase == v1.NamespaceTerminating {
 		return nil, Forget
 	}
 	arqObj, exists, err := ctrl.arqInformer.GetIndexer().GetByKey(arqNS + "/" + arqName)

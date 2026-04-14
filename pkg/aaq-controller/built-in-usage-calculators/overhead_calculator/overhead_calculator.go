@@ -25,7 +25,7 @@ func CalculateMemoryOverhead(kvConfig *v1.KubeVirtConfiguration, netBindingPlugi
 	if vmiCPUArch == "" {
 		vmiCPUArch = runtime.GOARCH
 	}
-	memoryOverhead := GetMemoryOverhead(vmi, runtime.GOARCH, kvConfig.AdditionalGuestMemoryOverheadRatio)
+	memoryOverhead := GetMemoryOverhead(vmi, vmiCPUArch, kvConfig.AdditionalGuestMemoryOverheadRatio)
 
 	var networkBinding map[string]v1.InterfaceBindingPlugin
 	if kvConfig.NetworkConfiguration != nil {

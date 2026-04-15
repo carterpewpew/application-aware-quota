@@ -260,7 +260,13 @@ func (ctrl *AaqGateController) Execute() bool {
 
 func (ctrl *AaqGateController) execute(ns string) (error, enqueueState) {
 	namespace, err := ctrl.namespaceLister.Get(ns)
-	if kapierrors.IsNotFound(err) || namespace.Status.Phase == v1.NamespaceTerminating {
+	if kapierrors.IsNotFound(err) {
+		return nil, Forget
+	}
+	if err != nil {
+		return err, BackOff
+	}
+	if namespace.Status.Phase == v1.NamespaceTerminating {
 		return nil, Forget
 	}
 

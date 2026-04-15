@@ -2,6 +2,7 @@ package aaq_evaluator
 
 import (
 	"fmt"
+	"os"
 	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -828,6 +829,25 @@ var _ = Describe("AaqEvaluator", func() {
 			},
 		),
 		)
+	})
+
+	Context("Test collectSidecarSockets timeout", func() {
+		It("should timeout when socket directory is empty", func() {
+			tmpDir, err := os.MkdirTemp("", "empty-sockets")
+			Expect(err).ToNot(HaveOccurred())
+			defer os.RemoveAll(tmpDir)
+
+			registry := newAaqEvaluatorsRegistry(1, tmpDir)
+			done := make(chan struct{})
+			var collectErr error
+			go func() {
+				defer close(done)
+				_, collectErr = registry.collectSidecarSockets(1, 200*time.Millisecond)
+			}()
+			Eventually(done, 5*time.Second).Should(BeClosed())
+			Expect(collectErr).To(HaveOccurred())
+			Expect(collectErr.Error()).To(ContainSubstring("Failed to collect all expected evaluators sidecars sockets within given timeout"))
+		})
 	})
 
 	Context("test calculators-registery ", func() {

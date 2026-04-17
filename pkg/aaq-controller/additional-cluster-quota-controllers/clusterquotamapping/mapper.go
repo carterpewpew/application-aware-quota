@@ -130,17 +130,25 @@ func (m *clusterQuotaMapper) completeQuota(quota *v1alpha1.ApplicationAwareClust
 // removeQuota deletes a quota from all mappings
 func (m *clusterQuotaMapper) removeQuota(quotaName string) {
 	m.lock.Lock()
-	defer m.lock.Unlock()
 
 	delete(m.requiredQuotaToSelector, quotaName)
 	delete(m.completedQuotaToSelector, quotaName)
 	delete(m.quotaToNamespaces, quotaName)
+	var removedNamespaces []string
 	for namespaceName, quotas := range m.namespaceToQuota {
 		if quotas.Has(quotaName) {
 			quotas.Delete(quotaName)
-			for _, listener := range m.listeners {
-				listener.RemoveMapping(quotaName, namespaceName)
-			}
+			removedNamespaces = append(removedNamespaces, namespaceName)
+		}
+	}
+
+	listeners := make([]MappingChangeListener, len(m.listeners))
+	copy(listeners, m.listeners)
+	m.lock.Unlock()
+
+	for _, namespaceName := range removedNamespaces {
+		for _, listener := range listeners {
+			listener.RemoveMapping(quotaName, namespaceName)
 		}
 	}
 }
@@ -178,17 +186,25 @@ func (m *clusterQuotaMapper) completeNamespace(namespace metav1.Object) {
 // removeNamespace deletes a namespace from all mappings
 func (m *clusterQuotaMapper) removeNamespace(namespaceName string) {
 	m.lock.Lock()
-	defer m.lock.Unlock()
 
 	delete(m.requiredNamespaceToLabels, namespaceName)
 	delete(m.completedNamespaceToLabels, namespaceName)
 	delete(m.namespaceToQuota, namespaceName)
+	var removedQuotas []string
 	for quotaName, namespaces := range m.quotaToNamespaces {
 		if namespaces.Has(namespaceName) {
 			namespaces.Delete(namespaceName)
-			for _, listener := range m.listeners {
-				listener.RemoveMapping(quotaName, namespaceName)
-			}
+			removedQuotas = append(removedQuotas, quotaName)
+		}
+	}
+
+	listeners := make([]MappingChangeListener, len(m.listeners))
+	copy(listeners, m.listeners)
+	m.lock.Unlock()
+
+	for _, quotaName := range removedQuotas {
+		for _, listener := range listeners {
+			listener.RemoveMapping(quotaName, namespaceName)
 		}
 	}
 }
@@ -217,15 +233,20 @@ func (m *clusterQuotaMapper) setMapping(quota *v1alpha1.ApplicationAwareClusterR
 	}
 
 	m.lock.Lock()
-	defer m.lock.Unlock()
 	selector, selectorExists = m.requiredQuotaToSelector[quota.Name]
 	selectionFields, selectionFieldsExist = m.requiredNamespaceToLabels[namespace.GetName()]
 	if !selectorMatches(selector, selectorExists, quota) {
+		m.lock.Unlock()
 		return false, false, selectionFieldsMatch(selectionFields, selectionFieldsExist, namespace)
 	}
 	if !selectionFieldsMatch(selectionFields, selectionFieldsExist, namespace) {
+		m.lock.Unlock()
 		return false, true, false
 	}
+
+	var notifyAdd, notifyRemove bool
+	quotaName := quota.Name
+	namespaceName := namespace.GetName()
 
 	if remove {
 		mutated := false
@@ -246,38 +267,43 @@ func (m *clusterQuotaMapper) setMapping(quota *v1alpha1.ApplicationAwareClusterR
 			quotas.Delete(quota.Name)
 		}
 
-		if mutated {
-			for _, listener := range m.listeners {
-				listener.RemoveMapping(quota.Name, namespace.GetName())
-			}
+		notifyRemove = mutated
+	} else {
+		mutated := false
+
+		namespaces, ok := m.quotaToNamespaces[quota.Name]
+		if !ok {
+			mutated = true
+			m.quotaToNamespaces[quota.Name] = sets.NewString(namespace.GetName())
+		} else {
+			mutated = !namespaces.Has(namespace.GetName())
+			namespaces.Insert(namespace.GetName())
 		}
 
-		return true, true, true
+		quotas, ok := m.namespaceToQuota[namespace.GetName()]
+		if !ok {
+			mutated = true
+			m.namespaceToQuota[namespace.GetName()] = sets.NewString(quota.Name)
+		} else {
+			mutated = mutated || !quotas.Has(quota.Name)
+			quotas.Insert(quota.Name)
+		}
+
+		notifyAdd = mutated
 	}
 
-	mutated := false
+	listeners := make([]MappingChangeListener, len(m.listeners))
+	copy(listeners, m.listeners)
+	m.lock.Unlock()
 
-	namespaces, ok := m.quotaToNamespaces[quota.Name]
-	if !ok {
-		mutated = true
-		m.quotaToNamespaces[quota.Name] = sets.NewString(namespace.GetName())
-	} else {
-		mutated = !namespaces.Has(namespace.GetName())
-		namespaces.Insert(namespace.GetName())
+	if notifyRemove {
+		for _, listener := range listeners {
+			listener.RemoveMapping(quotaName, namespaceName)
+		}
 	}
-
-	quotas, ok := m.namespaceToQuota[namespace.GetName()]
-	if !ok {
-		mutated = true
-		m.namespaceToQuota[namespace.GetName()] = sets.NewString(quota.Name)
-	} else {
-		mutated = mutated || !quotas.Has(quota.Name)
-		quotas.Insert(quota.Name)
-	}
-
-	if mutated {
-		for _, listener := range m.listeners {
-			listener.AddMapping(quota.Name, namespace.GetName())
+	if notifyAdd {
+		for _, listener := range listeners {
+			listener.AddMapping(quotaName, namespaceName)
 		}
 	}
 

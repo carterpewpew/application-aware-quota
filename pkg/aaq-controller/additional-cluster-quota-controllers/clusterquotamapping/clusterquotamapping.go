@@ -122,6 +122,7 @@ func (c *ClusterQuotaMappingController) syncQuota(quota *v1alpha12.ApplicationAw
 		return err
 	}
 
+	aborted := false
 	if err := c.namespaceLister.Each(labels.Everything(), func(obj metav1.Object) bool {
 		// attempt to set the mapping. The quotas never collide with each other (same quota is never processed twice in parallel)
 		// so this means that the project we have is out of date, pull a more recent copy from the cache and retest
@@ -140,6 +141,7 @@ func (c *ClusterQuotaMappingController) syncQuota(quota *v1alpha12.ApplicationAw
 			// if we've been updated, we'll be rekicked, if we've been deleted we should stop.  Either way, this
 			// execution is finished
 			if !quotaMatches {
+				aborted = true
 				return false
 			}
 			newer, err := c.namespaceLister.Get(obj.GetName())
@@ -158,7 +160,9 @@ func (c *ClusterQuotaMappingController) syncQuota(quota *v1alpha12.ApplicationAw
 		return err
 	}
 
-	c.clusterQuotaMapper.completeQuota(quota)
+	if !aborted {
+		c.clusterQuotaMapper.completeQuota(quota)
+	}
 	return nil
 }
 

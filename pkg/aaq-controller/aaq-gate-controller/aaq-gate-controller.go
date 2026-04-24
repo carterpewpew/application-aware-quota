@@ -2,6 +2,7 @@ package arq_controller
 
 import (
 	"context"
+	"fmt"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -148,9 +149,20 @@ func (ctrl *AaqGateController) enqueueAll() {
 
 // When a ApplicationAwareResourceQuota is deleted, enqueue all gated pods for revaluation
 func (ctrl *AaqGateController) deleteArq(obj interface{}) {
-	arq := obj.(*v1alpha12.ApplicationAwareResourceQuota)
+	arq, ok := obj.(*v1alpha12.ApplicationAwareResourceQuota)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %v", obj))
+			return
+		}
+		arq, ok = tombstone.Obj.(*v1alpha12.ApplicationAwareResourceQuota)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a ApplicationAwareResourceQuota %v", obj))
+			return
+		}
+	}
 	ctrl.nsQueue.Add(arq.Namespace)
-	return
 }
 
 // When a ApplicationAwareResourceQuota is updated, enqueue all gated pods for revaluation
@@ -169,12 +181,23 @@ func (ctrl *AaqGateController) updateArq(old, cur interface{}) {
 
 // When a ApplicationAwareResourceQuota is deleted, enqueue all gated pods for revaluation
 func (ctrl *AaqGateController) deleteAcrq(obj interface{}) {
-	acrq := obj.(*v1alpha12.ApplicationAwareClusterResourceQuota)
+	acrq, ok := obj.(*v1alpha12.ApplicationAwareClusterResourceQuota)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %v", obj))
+			return
+		}
+		acrq, ok = tombstone.Obj.(*v1alpha12.ApplicationAwareClusterResourceQuota)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a ApplicationAwareClusterResourceQuota %v", obj))
+			return
+		}
+	}
 	namespaces, _ := ctrl.clusterQuotaMapper.GetNamespacesFor(acrq.Name)
 	for _, ns := range namespaces {
 		ctrl.nsQueue.Add(ns)
 	}
-	return
 }
 
 // When a ApplicationAwareResourceQuota is updated, enqueue all gated pods for revaluation
@@ -206,9 +229,20 @@ func (ctrl *AaqGateController) updateAaqjqc(old, cur interface{}) {
 
 // When a ApplicationAwareResourceQuota is updated, enqueue all gated pods for revaluation
 func (ctrl *AaqGateController) deleteAaqjqc(obj interface{}) {
-	aaqjqc := obj.(*v1alpha12.AAQJobQueueConfig)
+	aaqjqc, ok := obj.(*v1alpha12.AAQJobQueueConfig)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("couldn't get object from tombstone %v", obj))
+			return
+		}
+		aaqjqc, ok = tombstone.Obj.(*v1alpha12.AAQJobQueueConfig)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("tombstone contained object that is not a AAQJobQueueConfig %v", obj))
+			return
+		}
+	}
 	ctrl.nsQueue.Add(aaqjqc.Namespace)
-	return
 }
 
 func (ctrl *AaqGateController) addPod(obj interface{}) {

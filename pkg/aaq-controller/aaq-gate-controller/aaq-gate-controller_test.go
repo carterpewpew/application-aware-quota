@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	aaq_evaluator "kubevirt.io/application-aware-quota/pkg/aaq-controller/aaq-evaluator"
+	"kubevirt.io/application-aware-quota/pkg/aaq-controller/additional-cluster-quota-controllers/clusterquotamapping"
 	"kubevirt.io/application-aware-quota/pkg/client"
 	"kubevirt.io/application-aware-quota/pkg/generated/aaq/clientset/versioned/fake"
 	"kubevirt.io/application-aware-quota/pkg/generated/aaq/informers/externalversions"
@@ -330,6 +331,117 @@ var _ = Describe("Test aaq-gate-controller", func() {
 	),
 	)
 
+	Context("Bug reproduction: delete handlers panic on cache.DeletedFinalStateUnknown tombstones", func() {
+		var mockCtrl *gomock.Controller
+		BeforeEach(func() {
+			mockCtrl = gomock.NewController(GinkgoT())
+		})
+
+		It("deleteArq panics when given a tombstone instead of *ApplicationAwareResourceQuota", func() {
+			cli := client.NewMockAAQClient(mockCtrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			qc := setupAAQGateController(cli, nil, nil, nil, namespaceLister, recorder)
+
+			arq := &v1alpha1.ApplicationAwareResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-arq", Namespace: testNs},
+			}
+			tombstone := cache.DeletedFinalStateUnknown{
+				Key: testNs + "/test-arq",
+				Obj: arq,
+			}
+
+			Expect(func() { qc.deleteArq(tombstone) }).NotTo(Panic())
+		})
+
+		It("deleteAcrq panics when given a tombstone instead of *ApplicationAwareClusterResourceQuota", func() {
+			cli := client.NewMockAAQClient(mockCtrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			mapper := clusterquotamapping.NewClusterQuotaMapper()
+			qc := setupAAQGateControllerWithMapper(cli, nil, nil, nil, namespaceLister, recorder, mapper)
+
+			acrq := &v1alpha1.ApplicationAwareClusterResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-acrq"},
+			}
+			tombstone := cache.DeletedFinalStateUnknown{
+				Key: "test-acrq",
+				Obj: acrq,
+			}
+
+			Expect(func() { qc.deleteAcrq(tombstone) }).NotTo(Panic())
+		})
+
+		It("deleteAaqjqc panics when given a tombstone instead of *AAQJobQueueConfig", func() {
+			cli := client.NewMockAAQClient(mockCtrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			qc := setupAAQGateController(cli, nil, nil, nil, namespaceLister, recorder)
+
+			aaqjqc := &v1alpha1.AAQJobQueueConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-aaqjqc", Namespace: testNs},
+			}
+			tombstone := cache.DeletedFinalStateUnknown{
+				Key: testNs + "/test-aaqjqc",
+				Obj: aaqjqc,
+			}
+
+			Expect(func() { qc.deleteAaqjqc(tombstone) }).NotTo(Panic())
+		})
+
+		It("deleteArq should handle completely invalid tombstone objects gracefully", func() {
+			cli := client.NewMockAAQClient(mockCtrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			qc := setupAAQGateController(cli, nil, nil, nil, namespaceLister, recorder)
+
+			invalidObj := "not-a-real-object"
+
+			Expect(func() { qc.deleteArq(invalidObj) }).NotTo(Panic())
+		})
+	})
+
+	Context("Test delete handlers with tombstone-wrapped objects", func() {
+		var ctrl *gomock.Controller
+		BeforeEach(func() {
+			ctrl = gomock.NewController(GinkgoT())
+		})
+
+		It("deleteArq should not panic when receiving a DeletedFinalStateUnknown tombstone", func() {
+			cli := client.NewMockAAQClient(ctrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			qc := setupAAQGateController(cli, nil, nil, nil, namespaceLister, recorder)
+
+			arq := &v1alpha1.ApplicationAwareResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-arq", Namespace: testNs},
+			}
+			tombstone := cache.DeletedFinalStateUnknown{
+				Key: testNs + "/test-arq",
+				Obj: arq,
+			}
+
+			Expect(func() { qc.deleteArq(tombstone) }).NotTo(Panic())
+		})
+
+		It("deleteAaqjqc should not panic when receiving a DeletedFinalStateUnknown tombstone", func() {
+			cli := client.NewMockAAQClient(ctrl)
+			recorder := record.NewFakeRecorder(100)
+			namespaceLister := testsutils.FakeNamespaceLister{Namespaces: map[string]*corev1.Namespace{testNs: {ObjectMeta: metav1.ObjectMeta{Name: testNs}}}}
+			qc := setupAAQGateController(cli, nil, nil, nil, namespaceLister, recorder)
+
+			aaqjqc := &v1alpha1.AAQJobQueueConfig{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-aaqjqc", Namespace: testNs},
+			}
+			tombstone := cache.DeletedFinalStateUnknown{
+				Key: testNs + "/test-aaqjqc",
+				Obj: aaqjqc,
+			}
+
+			Expect(func() { qc.deleteAaqjqc(tombstone) }).NotTo(Panic())
+		})
+	})
+
 })
 
 func setupAAQGateController(clientSet client.AAQClient, podInformer cache.SharedIndexInformer, arqInformer cache.SharedIndexInformer, aaqjcInformer cache.SharedIndexInformer, nsLister testsutils.FakeNamespaceLister, recorder *record.FakeRecorder) *AaqGateController {
@@ -354,6 +466,37 @@ func setupAAQGateController(clientSet client.AAQClient, podInformer cache.Shared
 		nil,
 		nsLister,
 		nil,
+		recorder,
+		false,
+		stop,
+	)
+	informerFactory.Start(stop)
+	kubeInformerFactory.Start(stop)
+	return qc
+}
+
+func setupAAQGateControllerWithMapper(clientSet client.AAQClient, podInformer cache.SharedIndexInformer, arqInformer cache.SharedIndexInformer, aaqjcInformer cache.SharedIndexInformer, nsLister testsutils.FakeNamespaceLister, recorder *record.FakeRecorder, mapper clusterquotamapping.ClusterQuotaMapper) *AaqGateController {
+	informerFactory := externalversions.NewSharedInformerFactory(fake.NewSimpleClientset(), 0)
+	kubeInformerFactory := informers.NewSharedInformerFactory(k8sfake.NewSimpleClientset(), 0)
+	if podInformer == nil {
+		podInformer = kubeInformerFactory.Core().V1().Pods().Informer()
+	}
+	if arqInformer == nil {
+		arqInformer = informerFactory.Aaq().V1alpha1().ApplicationAwareResourceQuotas().Informer()
+	}
+	if aaqjcInformer == nil {
+		aaqjcInformer = informerFactory.Aaq().V1alpha1().AAQJobQueueConfigs().Informer()
+	}
+	stop := make(chan struct{})
+	qc := NewAaqGateController(clientSet,
+		podInformer,
+		arqInformer,
+		aaqjcInformer,
+		nil,
+		aaq_evaluator.GetAaqEvaluatorsRegistry(),
+		nil,
+		nsLister,
+		mapper,
 		recorder,
 		false,
 		stop,
